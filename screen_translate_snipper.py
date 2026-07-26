@@ -411,6 +411,7 @@ class MainWindow(QWidget):
             "RGB", (width, height), buf, "raw", "RGB", stride, 1
         )
 
+        image.save(os.path.join(os.path.expanduser("~"), "Desktop", "debug_capture.png"))   #调试
         self.thread = QThread()
         self.worker = Worker(image)
         self.worker.moveToThread(self.thread)
