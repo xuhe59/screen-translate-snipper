@@ -1,52 +1,120 @@
-name: build-windows-exe
+name: Build Screen Translate Windows EXE
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+
 
 jobs:
+
   build:
+
     runs-on: windows-latest
+
 
     steps:
 
+    # 1. 获取代码
     - name: Checkout code
       uses: actions/checkout@v4
 
+
+    # 2. 安装 Python
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
         python-version: "3.11"
 
-    - name: Install dependencies
-      shell: pwsh
-      run: |
-        python -m pip install --upgrade pip
-        pip install PySide6 mss pillow pytesseract deep-translator keyboard pyinstaller
 
-    - name: Install Tesseract
+
+    # 3. 安装 Python 依赖
+    - name: Install Python packages
       shell: pwsh
       run: |
+
+        python -m pip install --upgrade pip
+
+        pip install `
+          PySide6 `
+          mss `
+          pillow `
+          pytesseract `
+          deep-translator `
+          keyboard `
+          pyinstaller
+
+
+
+    # 4. 安装 Tesseract OCR
+    - name: Install Tesseract OCR
+      shell: pwsh
+      run: |
+
         choco install tesseract -y --no-progress
+
 
         $paths = @(
           "C:\Program Files\Tesseract-OCR\tesseract.exe",
           "C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"
         )
 
+
         foreach ($p in $paths) {
+
           if (Test-Path $p) {
-            echo "找到Tesseract: $p"
+
+            echo "找到Tesseract:"
+            echo $p
+
             echo "TESSERACT_PATH=$p" >> $env:GITHUB_ENV
+
             break
           }
+
         }
 
-        tesseract --version
 
 
-    - name: Build exe
+        if (-not $env:TESSERACT_PATH) {
+
+          throw "没有找到Tesseract"
+
+        }
+
+
+
+        & $env:TESSERACT_PATH --version
+
+
+
+
+    # 5. 下载中文OCR识别库
+    - name: Install Chinese OCR data
       shell: pwsh
       run: |
+
+
+        New-Item `
+          -ItemType Directory `
+          -Force `
+          -Path tessdata
+
+
+
+        Invoke-WebRequest `
+          -Uri "https://github.com/tesseract-ocr/tessdata/raw/main/chi_sim.traineddata" `
+          -OutFile "tessdata\chi_sim.traineddata"
+
+
+
+
+    # 6. 打包exe
+    - name: Build EXE
+      shell: pwsh
+      run: |
+
 
         pyinstaller `
           --noconfirm `
@@ -54,11 +122,18 @@ jobs:
           --onefile `
           --windowed `
           --name ScreenTranslateSnipper `
+          --add-data "tessdata;tessdata" `
           screen_translate_snipper.py
 
 
-    - name: Upload exe
+
+
+    # 7. 上传生成文件
+    - name: Upload EXE
       uses: actions/upload-artifact@v4
+
       with:
-        name: ScreenTranslateSnipper
+
+        name: ScreenTranslateSnipper-Windows
+
         path: dist/ScreenTranslateSnipper.exe
