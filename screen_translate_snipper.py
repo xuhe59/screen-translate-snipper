@@ -1,5 +1,7 @@
 import os
 import sys
+import socket
+import traceback
 
 from dataclasses import dataclass
 
@@ -16,6 +18,7 @@ from PySide6.QtGui import (
     QPainter,
     QPen,
     QColor,
+    QImage,
     QIcon,
     QAction,
 )
@@ -32,7 +35,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QStyle,
 )
-
 
 from PIL import Image
 
@@ -53,6 +55,11 @@ except Exception:
 
 APP_NAME = "Screen Translate"
 
+# 给所有网络请求设一个默认超时兜底，避免翻译请求卡死不返回也不报错
+# （deep_translator 内部用的 requests 库，如果调用时没显式传 timeout，
+#  会退化使用这个 socket 默认超时）
+socket.setdefaulttimeout(15)
+
 
 # ==========================
 # Tesseract路径处理
@@ -62,7 +69,7 @@ def setup_tesseract():
 
     paths = []
 
-    # exe打包后的路径 (PyInstaller)
+    # exe打包后的路径 (PyInstaller --onefile 解压到的临时目录)
     if getattr(sys, "frozen", False):
         base = sys._MEIPASS
         paths.append(os.path.join(base, "tesseract.exe"))
@@ -71,7 +78,7 @@ def setup_tesseract():
         if os.path.exists(tessdata):
             os.environ["TESSDATA_PREFIX"] = tessdata
 
-    # 普通Python运行路径
+    # 普通Python运行路径 / 系统安装路径
     paths.extend([
         r"C:\Program Files\Tesseract-OCR\tesseract.exe",
         r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
@@ -79,10 +86,8 @@ def setup_tesseract():
 
     for path in paths:
         if os.path.exists(path):
-            # 设置tesseract执行文件
             pytesseract.pytesseract.tesseract_cmd = path
 
-            # 设置语言库目录
             tess_dir = os.path.join(os.path.dirname(path), "tessdata")
             if os.path.exists(tess_dir):
                 os.environ["TESSDATA_PREFIX"] = tess_dir
@@ -93,6 +98,27 @@ def setup_tesseract():
 
 
 setup_tesseract()
+
+
+# ==========================
+# 全局异常处理
+# ==========================
+# --windowed 打包后没有控制台，任何没被 try/except 接住的异常会被静默吞掉，
+# 表现就是"点了没反应"。这里把所有未捕获异常都弹窗显示出来，方便定位问题。
+
+def install_excepthook():
+
+    def _hook(exc_type, exc_value, exc_tb):
+        text = "".join(
+            traceback.format_exception(exc_type, exc_value, exc_tb)
+        )
+        print(text, file=sys.stderr)
+        try:
+            QMessageBox.critical(None, "程序出错", text[-4000:])
+        except Exception:
+            pass
+
+    sys.excepthook = _hook
 
 
 # ==========================
@@ -129,10 +155,12 @@ class Worker(QObject):
 
     def run(self):
         try:
+            # --psm 6：把截图当成"一块统一的文本"，而不是用默认的整页版面分析。
+            # 截图通常是一行字/一小块区域，默认 PSM 很容易识别成"没有文字"。
             text = pytesseract.image_to_string(
                 self.image,
                 lang="eng+chi_sim",
-                config="--psm 6"   # 6 = 把图片当成一个统一的文本块，而不是整页排版
+                config="--psm 6",
             )
             text = text.strip()
 
@@ -145,15 +173,15 @@ class Worker(QObject):
                         source="auto",
                         target=self.target
                     ).translate(text)
-                except Exception:
-                    trans = "翻译失败（请检查网络连接）"
+                except Exception as e:
+                    trans = f"翻译失败：{e}"
             else:
                 trans = "未安装翻译模块 (deep_translator)"
 
             self.finished.emit(Result(text, trans))
 
-        except Exception as e:
-            self.error.emit(str(e))
+        except Exception:
+            self.error.emit(traceback.format_exc())
 
 
 # ==========================
@@ -182,7 +210,7 @@ class SelectionOverlay(QWidget):
 
         self.setCursor(Qt.CursorShape.CrossCursor)
 
-        # 覆盖所有屏幕
+        # 覆盖所有屏幕（虚拟桌面坐标，可能包含负值）
         rect = QRect()
         for s in QApplication.screens():
             rect = rect.united(s.geometry())
@@ -322,7 +350,6 @@ class MainWindow(QWidget):
 
         self.tray = QSystemTrayIcon(self)
 
-        # 优先使用打包目录下的 icon.ico，找不到就用系统内置图标兜底
         icon_path = os.path.join(
             getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
             "icon.ico"
@@ -391,27 +418,48 @@ class MainWindow(QWidget):
         self.overlay.show()
 
     # -----------------------
-    # 截图
+    # 截图（用 Qt 自带接口，避免第三方截图库和 Qt 坐标系不一致导致框选错位）
     # -----------------------
 
-    from PySide6.QtGui import QImage   # 加到已有的 QtGui import 里
-
     def capture(self, rect):
-        screen = QApplication.primaryScreen()
-        pixmap = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
 
-        qimage = pixmap.toImage().convertToFormat(QImage.Format.Format_RGB888)
-        width = qimage.width()
-        height = qimage.height()
-        stride = qimage.bytesPerLine()
+        try:
+            # 根据选区左上角判断在哪个物理屏幕上，再把坐标换算成
+            # 那块屏幕自己的局部坐标（grabWindow 要求的是屏幕局部坐标，
+            # 不是跨屏虚拟桌面坐标，多屏环境下这一步不能省）
+            screen = QApplication.screenAt(rect.topLeft())
+            if screen is None:
+                screen = QApplication.primaryScreen()
 
-        buf = bytes(qimage.constBits())[: stride * height]
+            local_rect = rect.translated(-screen.geometry().topLeft())
 
-        image = Image.frombuffer(
-            "RGB", (width, height), buf, "raw", "RGB", stride, 1
-        )
+            pixmap = screen.grabWindow(
+                0,
+                local_rect.x(),
+                local_rect.y(),
+                local_rect.width(),
+                local_rect.height(),
+            )
 
-        image.save(os.path.join(os.path.expanduser("~"), "Desktop", "debug_capture.png"))   #调试
+            if pixmap.isNull():
+                raise RuntimeError("截图失败：抓取到的图像为空")
+
+            qimage = pixmap.toImage().convertToFormat(QImage.Format.Format_RGB888)
+            width = qimage.width()
+            height = qimage.height()
+            stride = qimage.bytesPerLine()
+
+            buf = bytes(qimage.constBits())[: stride * height]
+
+            image = Image.frombuffer(
+                "RGB", (width, height), buf, "raw", "RGB", stride, 1
+            )
+
+        except Exception:
+            self.show()
+            QMessageBox.warning(self, "截图失败", traceback.format_exc()[-3000:])
+            return
+
         self.thread = QThread()
         self.worker = Worker(image)
         self.worker.moveToThread(self.thread)
@@ -436,7 +484,7 @@ class MainWindow(QWidget):
 
     def show_error(self, msg):
         self.show()
-        QMessageBox.warning(self, "错误", msg)
+        QMessageBox.warning(self, "错误", msg[-3000:])
 
     def closeEvent(self, event):
         if hasattr(self, "tray"):
@@ -452,7 +500,7 @@ class MainWindow(QWidget):
 
 def main():
 
-    # Windows 高DPI支持（框选坐标与实际截图对齐的关键）
+    # Windows 高DPI支持（框选坐标与实际截图对齐的关键之一）
     if sys.platform == "win32":
         try:
             import ctypes
@@ -465,6 +513,8 @@ def main():
     )
 
     app = QApplication(sys.argv)
+
+    install_excepthook()
 
     # 关闭最后一个窗口不退出（保留托盘运行）
     app.setQuitOnLastWindowClosed(False)
