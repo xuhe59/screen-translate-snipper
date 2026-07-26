@@ -34,7 +34,6 @@ from PySide6.QtWidgets import (
 )
 
 
-import mss
 from PIL import Image
 
 import pytesseract
@@ -133,6 +132,7 @@ class Worker(QObject):
             text = pytesseract.image_to_string(
                 self.image,
                 lang="eng+chi_sim"
+                config="--psm 6"   # 6 = 把图片当成一个统一的文本块，而不是整页排版
             )
             text = text.strip()
 
@@ -394,17 +394,22 @@ class MainWindow(QWidget):
     # 截图
     # -----------------------
 
+    from PySide6.QtGui import QImage   # 加到已有的 QtGui import 里
+
     def capture(self, rect):
+        screen = QApplication.primaryScreen()
+        pixmap = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
 
-        with mss.mss() as sct:
-            img = sct.grab({
-                "left": rect.x(),
-                "top": rect.y(),
-                "width": rect.width(),
-                "height": rect.height(),
-            })
+        qimage = pixmap.toImage().convertToFormat(QImage.Format.Format_RGB888)
+        width = qimage.width()
+        height = qimage.height()
+        stride = qimage.bytesPerLine()
 
-            image = Image.frombytes("RGB", img.size, img.rgb)
+        buf = bytes(qimage.constBits())[: stride * height]
+
+        image = Image.frombuffer(
+            "RGB", (width, height), buf, "raw", "RGB", stride, 1
+        )
 
         self.thread = QThread()
         self.worker = Worker(image)
