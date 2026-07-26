@@ -111,20 +111,18 @@ jobs:
 
 
     # 6. 打包exe
-    - name: Build EXE
-      shell: pwsh
-      run: |
+     - name: Build EXE
+     shell: pwsh
+     run: |
 
-
-        pyinstaller `
-          --noconfirm `
-          --clean `
-          --onefile `
-          --windowed `
-          --name ScreenTranslateSnipper `
-          --add-data "tessdata;tessdata" `
-          screen_translate_snipper.py
-
+      pyinstaller `
+        --noconfirm `
+        --clean `
+        --onefile `
+        --windowed `
+        --name ScreenTranslateSnipper `
+        --add-data "tessdata;tessdata" `
+        screen_translate_snipper.py
 
 
 
