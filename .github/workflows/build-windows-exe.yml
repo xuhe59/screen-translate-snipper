@@ -22,7 +22,22 @@ jobs:
       - name: Install Tesseract OCR
         shell: pwsh
         run: |
-          choco install tesseract -y --no-progress
+          $ErrorActionPreference = "Stop"
+         choco install tesseract -y --no-progress
+
+          $candidates = @(
+         "$env:ProgramFiles\Tesseract-OCR\tesseract.exe",
+         "${env:ProgramFiles(x86)}\Tesseract-OCR\tesseract.exe",
+         "$env:ChocolateyInstall\bin\tesseract.exe"
+         )
+
+          $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if (-not $exe) {
+        throw "找不到 tesseract.exe，说明安装没有成功，或者安装目录不是默认路径。"
+        }
+
+        "TESSERACT_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        & $exe --version
 
       - name: Install Python packages
         shell: pwsh
@@ -31,21 +46,19 @@ jobs:
           pip install PySide6 mss pillow pytesseract deep-translator keyboard pyinstaller
 
       - name: Bundle Tesseract files
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $exe = (Get-Command tesseract).Source
-          $dir = Split-Path $exe -Parent
+  shell: pwsh
+  run: |
+    $ErrorActionPreference = "Stop"
+    $exe = $env:TESSERACT_EXE
+    $dir = Split-Path $exe -Parent
 
-          New-Item -ItemType Directory -Force -Path bundle\tesseract | Out-Null
-          Copy-Item "$dir\*" bundle\tesseract -Recurse -Force
+    New-Item -ItemType Directory -Force -Path bundle\tesseract | Out-Null
+    Copy-Item "$dir\*" bundle\tesseract -Recurse -Force
 
-          # 如果仓库里放了中文语言包，就一起带上
-          # 推荐路径：assets/tessdata/chi_sim.traineddata
-          if (Test-Path "assets\tessdata") {
-            New-Item -ItemType Directory -Force -Path bundle\tesseract\tessdata | Out-Null
-            Copy-Item "assets\tessdata\*" bundle\tesseract\tessdata -Recurse -Force
-          }
+    if (Test-Path "assets\tessdata") {
+      New-Item -ItemType Directory -Force -Path bundle\tesseract\tessdata | Out-Null
+      Copy-Item "assets\tessdata\*" bundle\tesseract\tessdata -Recurse -Force
+    }
 
       - name: Build exe
         shell: pwsh
