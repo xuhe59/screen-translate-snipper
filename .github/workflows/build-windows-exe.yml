@@ -2,81 +2,63 @@ name: build-windows-exe
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Install Tesseract OCR
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-         choco install tesseract -y --no-progress
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
 
-          $candidates = @(
-         "$env:ProgramFiles\Tesseract-OCR\tesseract.exe",
-         "${env:ProgramFiles(x86)}\Tesseract-OCR\tesseract.exe",
-         "$env:ChocolateyInstall\bin\tesseract.exe"
-         )
+    - name: Install dependencies
+      shell: pwsh
+      run: |
+        python -m pip install --upgrade pip
+        pip install PySide6 mss pillow pytesseract deep-translator keyboard pyinstaller
 
-          $exe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-        if (-not $exe) {
-        throw "找不到 tesseract.exe，说明安装没有成功，或者安装目录不是默认路径。"
+    - name: Install Tesseract
+      shell: pwsh
+      run: |
+        choco install tesseract -y --no-progress
+
+        $paths = @(
+          "C:\Program Files\Tesseract-OCR\tesseract.exe",
+          "C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"
+        )
+
+        foreach ($p in $paths) {
+          if (Test-Path $p) {
+            echo "找到Tesseract: $p"
+            echo "TESSERACT_PATH=$p" >> $env:GITHUB_ENV
+            break
+          }
         }
 
-        "TESSERACT_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-        & $exe --version
+        tesseract --version
 
-      - name: Install Python packages
-        shell: pwsh
-        run: |
-          python -m pip install --upgrade pip
-          pip install PySide6 mss pillow pytesseract deep-translator keyboard pyinstaller
 
-      - name: Bundle Tesseract files
-  shell: pwsh
-  run: |
-    $ErrorActionPreference = "Stop"
-    $exe = $env:TESSERACT_EXE
-    $dir = Split-Path $exe -Parent
+    - name: Build exe
+      shell: pwsh
+      run: |
 
-    New-Item -ItemType Directory -Force -Path bundle\tesseract | Out-Null
-    Copy-Item "$dir\*" bundle\tesseract -Recurse -Force
+        pyinstaller `
+          --noconfirm `
+          --clean `
+          --onefile `
+          --windowed `
+          --name ScreenTranslateSnipper `
+          screen_translate_snipper.py
 
-    if (Test-Path "assets\tessdata") {
-      New-Item -ItemType Directory -Force -Path bundle\tesseract\tessdata | Out-Null
-      Copy-Item "assets\tessdata\*" bundle\tesseract\tessdata -Recurse -Force
-    }
 
-      - name: Build exe
-        shell: pwsh
-        run: |
-          pyinstaller --noconfirm --clean --onefile --windowed `
-            --name ScreenTranslateSnipper `
-            --add-data "bundle\tesseract;tesseract" `
-            screen_translate_snipper.py
-
-      - name: Package zip
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path release | Out-Null
-          Compress-Archive -Path dist\ScreenTranslateSnipper.exe `
-            -DestinationPath release\ScreenTranslateSnipper-win64.zip -Force
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ScreenTranslateSnipper-win64
-          path: release/ScreenTranslateSnipper-win64.zip
+    - name: Upload exe
+      uses: actions/upload-artifact@v4
+      with:
+        name: ScreenTranslateSnipper
+        path: dist/ScreenTranslateSnipper.exe
