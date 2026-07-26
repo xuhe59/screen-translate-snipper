@@ -109,8 +109,9 @@ jobs:
 
 
 
-# 6. 打包exe
-- name: Build EXE
+
+    # 6. 打包exe
+    - name: Build EXE
   shell: pwsh
   run: |
 
@@ -121,9 +122,8 @@ jobs:
       --windowed `
       --name ScreenTranslateSnipper `
       --add-data "tessdata;tessdata" `
-      --add-data "C:\Program Files\Tesseract-OCR\tessdata;tessdata" `
-      --add-binary "C:\Program Files\Tesseract-OCR\tesseract.exe;." `
       screen_translate_snipper.py
+
 
     # 7. 上传生成文件
     - name: Upload EXE
