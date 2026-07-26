@@ -131,7 +131,7 @@ class Worker(QObject):
         try:
             text = pytesseract.image_to_string(
                 self.image,
-                lang="eng+chi_sim"
+                lang="eng+chi_sim",
                 config="--psm 6"   # 6 = 把图片当成一个统一的文本块，而不是整页排版
             )
             text = text.strip()
