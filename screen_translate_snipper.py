@@ -67,8 +67,12 @@ def setup_tesseract():
 
     paths = []
 
+
+    # exe打包后的路径
     if getattr(sys, "frozen", False):
+
         base = sys._MEIPASS
+
         paths.append(
             os.path.join(
                 base,
@@ -78,20 +82,64 @@ def setup_tesseract():
         )
 
 
+        # 中文语言包路径
+        tessdata = os.path.join(
+            base,
+            "tessdata"
+        )
+
+        if os.path.exists(tessdata):
+
+            os.environ["TESSDATA_PREFIX"] = tessdata
+
+
+
+    # 普通Python运行路径
     paths.extend([
+
         r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+
         r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"
+
     ])
 
 
-    for p in paths:
-        if os.path.exists(p):
-            pytesseract.pytesseract.tesseract_cmd = p
-            return
+
+    for path in paths:
+
+
+        if os.path.exists(path):
+
+
+            # 设置tesseract执行文件
+
+            pytesseract.pytesseract.tesseract_cmd = path
+
+
+
+            # 设置语言库目录
+
+            tess_dir = os.path.join(
+                os.path.dirname(path),
+                "tessdata"
+            )
+
+
+            if os.path.exists(tess_dir):
+
+                os.environ["TESSDATA_PREFIX"] = tess_dir
+
+
+
+            return True
+
+
+
+    return False
+
 
 
 setup_tesseract()
-
 
 
 # ==========================
