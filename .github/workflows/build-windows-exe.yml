@@ -20,14 +20,19 @@ jobs:
         with:
           python-version: "3.11"
 
-      # 3. 安装 Python 依赖
+      # 3. 安装 Python 依赖（已去掉 mss，截图改用 Qt 自带接口）
       - name: Install Python packages
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install PySide6  pillow pytesseract deep-translator keyboard pyinstaller
+          pip install PySide6 pillow pytesseract deep-translator keyboard pyinstaller
 
-      # 4. 安装 Tesseract OCR
+      # 4. 安装 UPX（压缩 exe/dll 体积，PyInstaller 会自动检测并使用）
+      - name: Install UPX
+        shell: pwsh
+        run: choco install upx -y --no-progress
+
+      # 5. 安装 Tesseract OCR
       - name: Install Tesseract OCR
         shell: pwsh
         run: |
@@ -52,14 +57,14 @@ jobs:
 
           Write-Host "找到 Tesseract: $found"
 
-          # 关键修复：GITHUB_ENV 只在“下一个 step”生效，
-          # 当前 step 要用，必须同时给 $env: 赋值
+          # 关键：GITHUB_ENV 只在“下一个 step”生效，
+          # 当前 step 里要用，必须同时给 $env: 赋值
           $env:TESSERACT_PATH = $found
           Add-Content -Path $env:GITHUB_ENV -Value "TESSERACT_PATH=$found" -Encoding utf8
 
           & $found --version
 
-      # 5. 准备要打进 exe 里的 Tesseract 文件（可执行文件 + DLL + 语言包）
+      # 6. 准备要打进 exe 里的 Tesseract 文件（可执行文件 + DLL + 语言包）
       - name: Prepare bundled Tesseract files
         shell: pwsh
         run: |
@@ -72,24 +77,20 @@ jobs:
           Copy-Item "$tessDir\tesseract.exe" -Destination $bundleDir
           Copy-Item "$tessDir\*.dll" -Destination $bundleDir -ErrorAction SilentlyContinue
 
-          # 英文语言包：choco 安装通常自带，没有的话就下载
-          if (Test-Path "$tessDir\tessdata\eng.traineddata") {
-            Copy-Item "$tessDir\tessdata\eng.traineddata" -Destination "$bundleDir\tessdata"
-          } else {
-            Invoke-WebRequest `
-              -Uri "https://github.com/tesseract-ocr/tessdata/raw/main/eng.traineddata" `
-              -OutFile "$bundleDir\tessdata\eng.traineddata"
-          }
-
-          # 中文简体语言包：单独下载
+          # 语言包用 tessdata_fast 仓库：同样语言体积小很多，
+          # 对截图这种规整文字场景精度损失很小
           Invoke-WebRequest `
-            -Uri "https://github.com/tesseract-ocr/tessdata/raw/main/chi_sim.traineddata" `
+            -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata" `
+            -OutFile "$bundleDir\tessdata\eng.traineddata"
+
+          Invoke-WebRequest `
+            -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata" `
             -OutFile "$bundleDir\tessdata\chi_sim.traineddata"
 
           Write-Host "打包目录内容："
           Get-ChildItem $bundleDir -Recurse | Select-Object FullName
 
-      # 6. 打包exe（把 tesseract.exe / DLL / 语言包都塞进单文件 exe）
+      # 7. 打包exe
       - name: Build EXE
         shell: pwsh
         run: |
@@ -105,12 +106,21 @@ jobs:
             $addBinaryArgs += "$($_.FullName);."
           }
 
+          $extraArgs = @()
+          if (Test-Path "icon.ico") {
+            $extraArgs += "--icon"
+            $extraArgs += "icon.ico"
+            $extraArgs += "--add-data"
+            $extraArgs += "icon.ico;."
+          }
+
           pyinstaller --noconfirm --clean --onefile --windowed --name ScreenTranslateSnipper `
             @addBinaryArgs `
+            @extraArgs `
             --add-data "tesseract_bin\tessdata;tessdata" `
             screen_translate_snipper.py
 
-      # 7. 上传生成文件
+      # 8. 上传生成文件
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
