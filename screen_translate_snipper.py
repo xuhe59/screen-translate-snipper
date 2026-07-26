@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import socket
 import traceback
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QVBoxLayout,
+    QComboBox,
     QPlainTextEdit,
     QMessageBox,
     QSystemTrayIcon,
@@ -148,10 +150,24 @@ class Worker(QObject):
     finished = Signal(object)
     error = Signal(str)
 
-    def __init__(self, image, target="zh-CN"):
+    def __init__(self, image, mode="auto"):
         super().__init__()
         self.image = image
-        self.target = target
+        # mode: "auto"（识别到中文就翻英文，识别到英文就翻中文）
+        #       "to_zh"（无论识别到什么，都翻成中文）
+        #       "to_en"（无论识别到什么，都翻成英文）
+        self.mode = mode
+
+    def _pick_target(self, text):
+        if self.mode == "to_zh":
+            return "zh-CN"
+        if self.mode == "to_en":
+            return "en"
+        # auto：文本里只要出现汉字，就认为原文是中文，翻译成英文；
+        # 否则认为原文是英文（或其他语言），翻译成中文
+        if re.search(r"[\u4e00-\u9fff]", text):
+            return "en"
+        return "zh-CN"
 
     def run(self):
         try:
@@ -167,11 +183,13 @@ class Worker(QObject):
             if not text:
                 text = "没有识别到文字"
 
+            target = self._pick_target(text)
+
             if GoogleTranslator:
                 try:
                     trans = GoogleTranslator(
                         source="auto",
-                        target=self.target
+                        target=target
                     ).translate(text)
                 except Exception as e:
                     trans = f"翻译失败：{e}"
@@ -333,10 +351,16 @@ class MainWindow(QWidget):
 
         label = QLabel("Ctrl + Shift + T\n框选屏幕文字翻译")
 
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("自动（中↔英）", "auto")
+        self.mode_combo.addItem("只翻成中文", "to_zh")
+        self.mode_combo.addItem("只翻成英文", "to_en")
+
         btn = QPushButton("开始翻译")
         btn.clicked.connect(self.start_capture)
 
         layout.addWidget(label)
+        layout.addWidget(self.mode_combo)
         layout.addWidget(btn)
 
     # -----------------------
@@ -460,8 +484,10 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "截图失败", traceback.format_exc()[-3000:])
             return
 
+        mode = self.mode_combo.currentData()
+
         self.thread = QThread()
-        self.worker = Worker(image)
+        self.worker = Worker(image, mode=mode)
         self.worker.moveToThread(self.thread)
 
         self.thread.started.connect(self.worker.run)
