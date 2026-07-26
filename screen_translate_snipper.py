@@ -1,5 +1,28 @@
 import os
 import sys
+import pytesseract
+
+def setup_tesseract_path():
+    candidates = []
+
+    if getattr(sys, "frozen", False):
+        base_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        candidates.append(os.path.join(base_dir, "tesseract", "tesseract.exe"))
+
+    candidates.append(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+    candidates.append(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe")
+
+    for path in candidates:
+        if os.path.exists(path):
+            pytesseract.pytesseract.tesseract_cmd = path
+            return path
+
+    return None
+
+setup_tesseract_path()
+
+import os
+import sys
 import threading
 from dataclasses import dataclass
 from typing import Optional
