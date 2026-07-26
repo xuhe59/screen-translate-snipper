@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
     QComboBox,
+    QCheckBox,
     QPlainTextEdit,
     QMessageBox,
     QSystemTrayIcon,
@@ -291,13 +292,27 @@ class SelectionOverlay(QWidget):
 
 class ResultWindow(QWidget):
 
+    # 记住这次程序运行期间用户上一次的选择，
+    # 这样下次框选弹出的新窗口会沿用同样的置顶状态
+    _default_always_on_top = False
+
     def __init__(self, result):
         super().__init__()
 
         self.setWindowTitle("屏幕翻译")
         self.resize(550, 450)
 
+        if ResultWindow._default_always_on_top:
+            self.setWindowFlags(
+                self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint
+            )
+
         layout = QVBoxLayout(self)
+
+        self.pin_checkbox = QCheckBox("窗口置顶（保持在桌面最前）")
+        self.pin_checkbox.setChecked(ResultWindow._default_always_on_top)
+        self.pin_checkbox.toggled.connect(self.toggle_always_on_top)
+        layout.addWidget(self.pin_checkbox)
 
         title = QLabel("识别结果")
         self.original = QPlainTextEdit()
@@ -320,6 +335,19 @@ class ResultWindow(QWidget):
 
     def copy(self):
         QApplication.clipboard().setText(self.trans.toPlainText())
+
+    def toggle_always_on_top(self, checked):
+        ResultWindow._default_always_on_top = checked
+
+        flags = self.windowFlags()
+        if checked:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        else:
+            flags &= ~Qt.WindowType.WindowStaysOnTopHint
+
+        self.setWindowFlags(flags)
+        # 修改 windowFlags 后 Qt 会隐藏窗口，需要重新 show() 才能生效
+        self.show()
 
 
 # ==========================
