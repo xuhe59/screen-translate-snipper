@@ -73,21 +73,18 @@ def setup_tesseract():
 
         base = sys._MEIPASS
 
-        paths.append(
-            os.path.join(
-                base,
-                "tesseract",
-                "tesseract.exe"
-            )
-        )
+paths.append(
+    os.path.join(
+        base,
+        "tesseract.exe"
+    )
+)
 
 
-        # 中文语言包路径
-        tessdata = os.path.join(
-            base,
-            "tessdata"
-        )
-
+os.environ["TESSDATA_PREFIX"] = os.path.join(
+    base,
+    "tessdata"
+)
         if os.path.exists(tessdata):
 
             os.environ["TESSDATA_PREFIX"] = tessdata
